@@ -2,7 +2,7 @@
 This repository is intended to contain various examples of predictive models that I have created
 
 ### **Optimzation using Pyomo glpk solver**
-Jupyter notebook: `Optimization with Pyomo.ipynb` **No guarantees on correct answers!!**
+Jupyter notebook: `Optimization with Pyomo.ipynb` **No guarantees on correct answers!!**  
 Problem descriptions: `INFO4590Portfolio3--PyomoOptimizationProblems.docx`  
 Data: `INFO4590PyomoData.xlsx`  
 
