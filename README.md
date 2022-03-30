@@ -18,6 +18,6 @@ This repository is intended to contain various examples of predictive models tha
 
 ### **INFO 4390 Final Project - Balancing Climate with Human Prosperity**
 This course focuses on predictive analytics using R
-**Data**: Same as above
-**R Markdown**: `INFO 4390_Project_Shumway.rmd`
+**Data**: Same as above \
+**R Markdown**: `INFO 4390_Project_Shumway.rmd` \
 **flex dashboard**: `INFO-4390_Project_Shumway.html`
