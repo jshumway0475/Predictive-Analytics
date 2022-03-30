@@ -1,0 +1,843 @@
+---
+title: "Balancing Climate with Human Prosperity"
+author: "Jacob Shumway"
+date: '`r Sys.Date()`'
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+    source_code: embed
+    theme: united
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+#include=FALSE will not include r code in output
+#warning=FALSE will remove any warnings from output
+
+library(GGally)
+library(flexdashboard)
+library(tidymodels) 
+  #library(parsnip) #v0.1.7 linear_reg(), set_engine(), set_mode(), fit(), predict()
+  #library(yardstick) #v0.0.8 metrics(), roc_auc(), roc_curve(), metric_set(), conf_matrix()
+  #library(dplyr) #v1.0.7 %>%, select(), select_if(), filter(), mutate(), group_by(), 
+    #summarize(), tibble()
+  #library(ggplot2) #v3.3.5 ggplot()
+  #library(broom) #v0.7.9 for tidy(), augment(), glance()
+  #library(rsample) #v0.1.0 initial_split()
+library(ranger) #rand_forest() #bagging and random forest
+library(xgboost) #boost_tree()
+library(cluster) #clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+library(pROC) #v1.17.0 roc()
+library(janitor) #v2.1.0 clean_names()
+library(vip) #v0.3.2 vip()
+library(readr) #v2.0.0 read_csv()
+library(stringr)
+library(fastshap)
+library(reticulate)
+```
+
+```{r load_data from Github}
+#Load the data
+url <- 'https://raw.githubusercontent.com/jshumway0475/Predictive-Analytics/main/wb_clean_data_countries.csv'
+#url <- 'C:\\Users\\jshum\\OneDrive - University of Denver\\INFO 4300\\Project\\wb_clean_data_countries.csv'
+wb_df <- read_csv(url)
+wb_df <- wb_df %>%
+  select(names(wb_df)[2:length(names(wb_df))])
+```
+
+Introduction {data-orientation=rows}
+=======================================================================
+
+Row {data-height=750}
+-----------------------------------------------------------------------
+### The Project
+
+#### Executive Summary
+
+We are living in an epoch of unprecedented human flourishing due to the major technological advances made during the first three industrial revolutions and the spread of democracy. This improvement is evidenced by increasing human life expectancy, and improving GDP per capita among other metrics (source: The World Bank). These are trends that every humanitarian hopes to continue going forward, but with every benefit there also comes a cost. Over the past several decades we have observed meaningful impact on the global climate tied to human activities (source: IPCC 2021 report). Per the IPCC 2021 report, if these trends continue human flourishing may be at risk.
+
+#### The Problem
+The purpose of my analysis is to better understand the relationship between human flourishing and climate change through examination of high level data sourced from The World Bank. I will attempt to identify the key drivers that impact GDP per capita (human flourishing indicator). I will also perform similar analysis on greenhouse gas emissions per capita (climate change indicator). Finally, I will perform categorical supervised modeling to identify solutions that result in continued improvement in GDP per capita while reducing greenhouse gas emissions per capita. Another question I hope to study with this analysis is if we are seeing evidence of diminishing returns with regards to human flourishing due to increased greenhouse gas emissions. Evidence for this would be non-linear dependence within the data set for variables related to these targets.
+
+#### The Data
+The World Bank has made available an API that can be accessed freely by the public. In addition, a python library has been created to facilitate usage of this data within python using pandas (https://pypi.org/project/wbgapi/). The World Bank dataset is extensive and there are many issues with the data that need to be addressed prior to usage in predictive modeling. For example, data quality and completeness can vary meaningfully for each country. There are also issues that can occur due to changes in the political landscape like when the Soviet Union dissolved in 1991 to form 12 separate nation-states. I assume that many of these issues that can be seen in the data are due to government reporting protocol, government transparency (think North Korea), latency in reporting, and assumptions made by the analysts that gather and process the data from these various sources. Below is a list of data columns considered for inclusion in this analysis with a description of that data field.
+
+### The Data
+VARIABLES TO PREDICT WITH
+
+* *economy*: The economy represented by the data. Generally the economy is synonymous with nation-state.
+* *time*: string representing the year associated with the row of data. Replace with `year`.
+* *EG.ELC.ACCS.ZS*: Access to electricity (% of population)
+* *EG.ELC.COAL.ZS*: Electricity production from coal sources (% of total)
+* *EG.ELC.FOSL.ZS*: Electricity production from oil, gas and coal sources (% of total). Redundant, will exclude.
+* *EG.ELC.HYRO.ZS*: Electricity production from hydroelectric sources (% of total)
+* *EG.ELC.LOSS.ZS*: Electric power transmission and distribution losses (% of output)
+* *EG.ELC.NGAS.ZS*: Electricity production from natural gas sources (% of total)
+* *EG.ELC.NUCL.ZS*: Electricity production from nuclear sources (% of total)
+* *EG.ELC.PETR.ZS*: Electricity production from oil sources (% of total)
+* *EG.ELC.RNWX.ZS*: Electricity production from renewable sources, excluding hydroelectric (% of total)
+* *EN.ATM.GHGT.KT.CE*: Total greenhouse gas emissions (kt of CO2 equivalent). Included in target variable.
+* *EN.ATM.METH.KT.CE*: Methane emissions (kt of CO2 equivalent). Redundant, will exclude.
+* *NE.EXP.GNFS.ZS*: Exports of goods and services (% of GDP)
+* *NE.IMP.GNFS.ZS*: Imports of goods and services (% of GDP)
+* *NV.AGR.TOTL.ZS*: Agriculture, forestry, and fishing, value added (% of GDP)
+* *NV.IND.TOTL.ZS*: Industry (including construction), value added (% of GDP)
+* *NV.IND.MANF.ZS*: Manufacturing, value added (% of GDP). Not used as it is a subset of `NV.IND.TOTL.ZS`
+* *NV.SRV.TOTL.ZS*: Services, value added (% of GDP)
+* *NY.GDP.MKTP.CD*: GDP (current US$). Included in target variable.
+* *SP.DYN.LE00.FE.IN*: Life expectancy at birth, female (years)
+* *SP.DYN.TFRT.IN*: Fertility rate, total (births per woman)
+* *SP.POP.TOTL*: Population, total. Included in target variable.
+* *SP.URB.TOTL*: Urban population. Mutate into a percent of total `urb_pop_pct`
+* *year*: Mutated version of `time` into a 4-digit year integer. Time series analysis not considered.
+* *c2e_per_capita*: `EN.ATM.METH.KT.CE` / `SP.POP.TOTL`. Not used in analysis.
+* *urb_pop_pct*: `SP.URB.TOTL` / `SP.POP.TOTL` * 100.
+
+VARIABLES WE WANT TO PREDICT
+
+* *gdp_per_capita*: `NY.GDP.MKTP.CD` / `SP.POP.TOTL`. Will be included as a predictor of `ghge_per_capita`.
+* *ghge_per_capita*: `EN.ATM.GHGT.KT.CE` / `SP.POP.TOTL`. Will be included as a predictor of `gdp_per_capita`.
+
+Data Exploration {data-orientation=columns}
+=======================================================================
+Column {.sidebar data-width=400}
+-------------------------------------
+
+### Data Overview 
+For this analysis we will retain 18 columns of data, 2 of which are target variables for 2 different analysis. In the data frame used for analysis purposes, each row represents an annual representation of the data for a given economy (nation-state). In this analysis, we will use time-series approaches and thus have removed the year integer, nor will will use the economy as a categorical variable for prediction as we prefer to let the annual data collected for each economy provide the prediction.
+
+Row {.column data-height=400}
+-----------------------------------------------------------------------
+### Examine the Predictor Variables Related to Energy
+```{r, cache=TRUE}
+# Remove columns that will not be used in analysis
+wb_df <- wb_df %>%
+  select(-economy, -time, -EG.ELC.FOSL.ZS, -EN.ATM.METH.KT.CE, -NV.IND.MANF.ZS, -c2e_per_capita, 
+         -EN.ATM.GHGT.KT.CE, -NY.GDP.MKTP.CD, -SP.POP.TOTL, -SP.URB.TOTL, -year)
+#View summary statistics for predictor variables
+wb_df %>%
+  select(EG.ELC.ACCS.ZS, EG.ELC.COAL.ZS, EG.ELC.HYRO.ZS, EG.ELC.LOSS.ZS, EG.ELC.NGAS.ZS, 
+         EG.ELC.NUCL.ZS, EG.ELC.PETR.ZS, EG.ELC.RNWX.ZS) %>%
+  summary()
+```
+
+### Examine the Predictor Variables Related to Social and Economic Measures
+```{r, cache=TRUE}
+#View summary statistics for predictor variables
+wb_df %>%
+  select(NE.EXP.GNFS.ZS, NE.IMP.GNFS.ZS, NV.AGR.TOTL.ZS, NV.IND.TOTL.ZS, NV.SRV.TOTL.ZS, 
+         SP.DYN.LE00.FE.IN, SP.DYN.TFRT.IN, urb_pop_pct) %>%
+  summary()
+```
+
+Row {data-height=400}
+-----------------------------------------------------------------------
+### Examine the Response Variables
+```{r, cache=TRUE}
+#View summary statistics for response variables
+wb_df %>%
+  select(gdp_per_capita, ghge_per_capita) %>%
+  summary()
+```
+
+Data Visualization {data-orientation=rows}
+=======================================================================
+### Response Variables relationships with predictors
+
+row {.column data-height=250}
+-----------------------------------------------------------------------
+### Histogram of `gdp_per_capita`
+
+```{r, cache=TRUE, fig.height=2, fig.width=6}
+# gdp_per_capita is highly skewed to the right
+ggplot(wb_df, aes(x = gdp_per_capita)) + geom_histogram(bins = 50)
+```
+
+### Histogram of `ghge_per_capita`
+```{r, cache=TRUE, fig.height=2, fig.width=6}
+# ghge_per_capita is also highly skewed to the right
+ggplot(wb_df, aes(x = ghge_per_capita)) + geom_histogram(bins = 50)
+```
+
+row {.column data-height=550}
+-----------------------------------------------------------------------
+### Scatterplots of energy measures against targets
+```{r, cache=TRUE, fig.height=15, fig.width=15}
+wb_df %>%
+  select(EG.ELC.ACCS.ZS, EG.ELC.COAL.ZS, EG.ELC.HYRO.ZS, EG.ELC.LOSS.ZS, EG.ELC.NGAS.ZS, 
+         EG.ELC.NUCL.ZS, EG.ELC.PETR.ZS, EG.ELC.RNWX.ZS, gdp_per_capita, ghge_per_capita) %>%
+  ggpairs() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+### Scatterplots of social and economic measures against targets
+```{r, cache=TRUE, fig.height=15, fig.width=15}
+wb_df %>%
+  select(NE.EXP.GNFS.ZS, NE.IMP.GNFS.ZS, NV.AGR.TOTL.ZS, NV.IND.TOTL.ZS, NV.SRV.TOTL.ZS, 
+         SP.DYN.LE00.FE.IN, SP.DYN.TFRT.IN, urb_pop_pct, gdp_per_capita, ghge_per_capita) %>%
+  ggpairs() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+```
+
+Question 1 {data-orientation=rows}
+=======================================================================
+Column {.sidebar data-width=300}
+-------------------------------------
+
+### Question Overview 
+
+#### What Factors Drive Quality of Life? 
+For this analysis we use gpd_per_capita as the best indicator for quality of life and thus we use that ratio as the target variable for the prediction. As discussed in previous sections, we are using 17 independent variables to predict quality of life. While gpd_per_capita does not capture all factors that lead to human thriving and happiness, I believe that it is a reasonable proxy given that societies with higher average financial resources generally provide better heathcare, education, and opportunities for advancement. A flaw in the metric is that it does not capture inequalities that exist within an economy.
+
+#### Conclusions
+gdp_per_capita can be very accurately predicted with the lasso regression, random forest, and tuned boosted tree model. The most important predictors for those models are *SP.DYN.LE00.FE.IN* and *NV.AGR.TOTL.ZS*. The lasso regression identified *log_ghge_pc* as the most important predictor. Economies that have lower life expectancy and rely on agriculture for their GDP have lower gdp_per_capita.
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+### Lasso Regression Model
+```{r}
+# Prepare dataframe for statistical regression
+wb_df_reg <- wb_df %>%
+  mutate(log_gdp_pc = log(gdp_per_capita)) %>%
+  mutate(log_ghge_pc = log(ghge_per_capita)) %>%
+  select(-gdp_per_capita, -ghge_per_capita)
+
+# Define recipe and prepare data
+ql_reg_recipe <- recipe(log_gdp_pc ~ ., data = wb_df_reg) %>% 
+  step_dummy(all_nominal()) %>% 
+  step_normalize(all_predictors()) %>%
+  prep()
+
+wb_reg_norm <- bake(ql_reg_recipe, wb_df_reg)
+
+# Create training and test datasets
+set.seed(1111)
+wb_reg_split <- initial_split(wb_df_reg, prop = 0.75)
+wb_reg_train <- rsample::training(wb_reg_split)
+wb_reg_test <- rsample::testing(wb_reg_split)
+
+# Create folds
+wb_reg_folds <- vfold_cv(wb_reg_train, v = 5)
+
+# Create penalty tuning grid
+penalty_grid <- tibble(penalty = 10^seq(-2, 5, len = 100))
+
+# Define metrics
+reg_metrics <- metric_set(yardstick::rmse, yardstick::mae, yardstick::rsq)
+```
+
+```{r}
+# Prepare model
+ql_reg_spec <- linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression") 
+
+#Create the workflow and tune the penalty
+ql_reg_wf <- workflow() %>%
+  add_model(ql_reg_spec) %>% 
+  add_formula(log_gdp_pc ~ .)
+
+ql_reg_rs <- ql_reg_wf %>%
+  tune_grid(resamples = wb_reg_folds, 
+            grid = penalty_grid,
+            metrics = reg_metrics)
+
+lowest_rmse_reg <- ql_reg_rs %>%
+  select_best("rmse", penalty)
+
+final_lasso <- ql_reg_wf %>% 
+  finalize_workflow(lowest_rmse_reg)
+final_lasso_fit <- final_lasso %>% 
+  fit(wb_reg_train)
+
+# Variable importance plot
+final_lasso_fit %>% 
+   extract_fit_parsnip() %>% 
+   vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Test Metrics for Lasso Regression
+```{r}
+# Create metrics table
+pred_final_lasso_fit <- final_lasso_fit %>% 
+  augment(wb_reg_test)
+
+ql_reg_metrics <- pred_final_lasso_fit %>%
+  metrics(truth = log_gdp_pc, estimate = .pred)
+
+results <- tibble(model = 'Lasso Regression (only compare rsq)',
+                  rmse = ql_reg_metrics[[1, 3]],
+                  mae = ql_reg_metrics[[3, 3]],
+                  rsq = ql_reg_metrics[[2, 3]])
+results
+```
+
+```{r}
+final_lasso_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(estimate != 0) %>%
+  arrange(desc(abs(estimate)))
+```
+
+
+### Actual vs Predicted
+```{r}
+plot_df <- pred_final_lasso_fit %>%
+  mutate(model = 'Lasso Regression')
+
+p <- plot_df %>%
+  ggplot(aes(x = .pred, y = log_gdp_pc, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted log(gdp_per_capita)') +
+  ylab('Actual log(gdp_per_capita)') +
+  geom_abline(col = 'black')
+p
+```
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+### Random Forest Model
+```{r}
+# Duplicate initial model used in Python on same data set for INFO 4300
+# https://github.com/jshumway0475/Predictive-Analytics/blob/main/INFO%204300%20Project_Modeling1_Shumway.ipynb
+
+# Create training and test datasets
+set.seed(1111)
+wb_split <- initial_split(wb_df, prop = 0.75)
+wb_train <- rsample::training(wb_split)
+wb_test <- rsample::testing(wb_split)
+
+rf_spec <- rand_forest(trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("regression")
+
+# Fit the model
+qual_life_rf <- rf_spec %>% 
+  fit(gdp_per_capita ~ ., data = wb_train)
+qual_life_rf
+```
+
+### Test Metrics for Random Forest Model
+```{r}
+# Create metrics table
+pred_ql_rf <- qual_life_rf %>%
+  augment(wb_test)
+
+ql_rf_metrics <- pred_ql_rf %>%
+  metrics(truth = gdp_per_capita, estimate = .pred)
+
+results_new <- tibble(model = 'Random Forest',
+                  rmse = ql_rf_metrics[[1, 3]],
+                  mae = ql_rf_metrics[[3, 3]],
+                  rsq = ql_rf_metrics[[2, 3]])
+results <- bind_rows(results, results_new)
+
+results
+```
+
+### Random Forest Model Feature Importance
+```{r}
+qual_life_rf %>%
+  vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Actual vs Predicted
+```{r}
+plot_df <- pred_ql_rf %>%
+  mutate(model = 'Random Forest')
+
+p <- plot_df %>%
+  ggplot(aes(x = .pred, y = gdp_per_capita, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted gdp per capita') +
+  ylab('Actual gdp per capita') +
+  geom_abline(col = 'black')
+p
+```
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+```{r}
+# Tuned Boosted Tree Model
+# Define CV folds and grid parameters
+wb_folds <- vfold_cv(wb_train, v = 5)
+xgb_grid <- grid_latin_hypercube(tree_depth(), 
+                                 min_n(), 
+                                 loss_reduction(), 
+                                 sample_size = sample_prop(), 
+                                 finalize(mtry(), wb_train),
+                                 learn_rate(), 
+                                 size = 25)
+
+# Define the model specification
+ql_xgb_spec <- boost_tree(trees = 1000,
+                          tree_depth = tune(),
+                          min_n = tune(),
+                          loss_reduction = tune(),
+                          sample_size = tune(),
+                          mtry = tune(),
+                          learn_rate = tune()) %>%
+  set_engine('xgboost') %>%
+  set_mode('regression')
+
+# Create workflow
+ql_xgb_wf <- workflow() %>%
+  add_formula(gdp_per_capita ~ .) %>%
+  add_model(ql_xgb_spec)
+
+# Tune the model
+ql_xgb_rs <- tune_grid(ql_xgb_wf, 
+                       resamples = wb_folds, 
+                       grid = xgb_grid, 
+                       control = control_grid(save_pred = TRUE))
+```
+
+### Tuned Gradient Boosted Tree Model
+```{r}
+# Select the best xbg model
+best_ql_xgb <- select_best(ql_xgb_rs, metric = 'rmse')
+
+# Finalize the workflow
+final_ql_xgb_wf <- ql_xgb_wf %>%
+  finalize_workflow(best_ql_xgb)
+final_ql_xgb_wf
+```
+
+```{r}
+# Fit the Final Boosted Tree Model
+final_ql_xgb <- final_ql_xgb_wf %>%
+  fit(data = wb_train)
+```
+
+### Test Metrics for Boosted Tree Model
+```{r}
+# Create metrics table
+pred_ql_xgb <- final_ql_xgb %>%
+  augment(wb_test)
+
+ql_xgb_metrics <- pred_ql_xgb %>%
+  metrics(truth = gdp_per_capita, estimate = .pred)
+
+results_new <- tibble(model = 'Tuned Boosted Tree',
+                  rmse = ql_xgb_metrics[[1, 3]],
+                  mae = ql_xgb_metrics[[3, 3]],
+                  rsq = ql_xgb_metrics[[2, 3]])
+results <- bind_rows(results, results_new)
+results
+```
+
+### Boosted Tree Model Feature Importance
+```{r}
+final_ql_xgb %>%
+  extract_fit_parsnip() %>%
+  vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Actual vs Predicted
+```{r}
+plot_df <- bind_rows(plot_df,
+                     pred_ql_xgb %>%
+                       mutate(model = 'Tuned Boosted Tree')
+                     )
+
+p <- plot_df %>%
+  ggplot(aes(x = .pred, y = gdp_per_capita, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted gdp per capita') +
+  ylab('Actual gdp per capita') +
+  geom_abline(col = 'black') +
+  ggtitle('Model Comparison')
+p
+```
+
+Question 2 {data-orientation=rows}
+=======================================================================
+Column {.sidebar data-width=300}
+-------------------------------------
+
+### Question Overview 
+
+#### What Factors Drive Greenhouse Gas Emissions? 
+For this analysis we use ghge_per_capita as the best indicator for climate change and thus we use that ratio as the target variable for the prediction. As discussed in previous sections, we are using 17 independent variables to predict drivers of climate change. We know that increased greenhouse gas emissions are causing the man-made climate change we are currently experiencing.
+
+#### Conclusions
+ghge_per_capita can be very accurately predicted with the random forest and tuned boosted tree model. The most important predictors for those models are *EG.ELC.NGAS.ZS* and *gpd_per_capita* and *NV.IND.TOTL.ZS*. Economies that generate more power with fossil fuels, have a higher gdp_per_capita and rely on industry will generate more greenhouse gasses.
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+### Lasso Regression Model
+```{r}
+# Prepare model
+climate_reg_spec <- linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("regression") 
+
+#Create the workflow and tune the penalty
+climate_reg_wf <- workflow() %>%
+  add_model(climate_reg_spec) %>% 
+  add_formula(log_ghge_pc ~ .)
+
+climate_reg_rs <- climate_reg_wf %>%
+  tune_grid(resamples = wb_reg_folds, 
+            grid = penalty_grid,
+            metrics = reg_metrics)
+
+low_rmse_reg <- climate_reg_rs %>%
+  select_best("rmse", penalty)
+
+final_climate_lasso <- climate_reg_wf %>% 
+  finalize_workflow(low_rmse_reg)
+final_climate_lasso_fit <- final_climate_lasso %>% 
+  fit(wb_reg_train)
+
+# Variable importance plot
+final_lasso_fit %>% 
+   extract_fit_parsnip() %>% 
+   vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Test Metrics for Lasso Regression
+```{r}
+# Create metrics table
+pred_climate_lasso_fit <- final_climate_lasso_fit %>% 
+  augment(wb_reg_test)
+
+climate_reg_metrics <- pred_climate_lasso_fit %>%
+  metrics(truth = log_ghge_pc, estimate = .pred)
+
+results2 <- tibble(model = 'Lasso Regression (only compare rsq)',
+                  rmse = climate_reg_metrics[[1, 3]],
+                  mae = climate_reg_metrics[[3, 3]],
+                  rsq = climate_reg_metrics[[2, 3]])
+results2
+```
+
+```{r}
+final_climate_lasso_fit %>%
+  extract_fit_parsnip() %>%
+  tidy() %>%
+  filter(estimate != 0) %>%
+  arrange(desc(abs(estimate)))
+```
+
+
+### Actual vs Predicted
+```{r}
+plot_df <- pred_climate_lasso_fit %>%
+  mutate(model = 'Lasso Regression')
+
+p <- plot_df %>%
+  ggplot(aes(x = .pred, y = log_ghge_pc, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted log(ghge_per_capita)') +
+  ylab('Actual log(ghge_per_capita)') +
+  geom_abline(col = 'black')
+p
+```
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+### Random Forest Model
+
+```{r}
+# Duplicate initial model used in Python on same data set for INFO 4300
+# https://github.com/jshumway0475/Predictive-Analytics/blob/main/INFO%204300%20Project_Modeling2_Shumway.ipynb
+rf_spec <- rand_forest(trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("regression")
+
+# Fit the model
+climate_rf <- rf_spec %>% 
+  fit(ghge_per_capita ~ ., data = wb_train)
+climate_rf
+```
+
+### Test Metrics for Random Forest Model
+```{r}
+# Create metrics table
+pred_climate_rf <- climate_rf %>%
+  augment(wb_test)
+
+climate_rf_metrics <- pred_climate_rf %>%
+  metrics(truth = ghge_per_capita, estimate = .pred)
+
+results2_new <- tibble(model = 'Random Forest',
+                  rmse = climate_rf_metrics[[1, 3]],
+                  mae = climate_rf_metrics[[3, 3]],
+                  rsq = climate_rf_metrics[[2, 3]])
+results2 <- bind_rows(results2, results2_new)
+
+results2
+```
+
+### Random Forest Model Feature Importance
+```{r}
+climate_rf %>%
+  vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Actual vs Predicted
+```{r}
+plot_df2 <- pred_climate_rf %>%
+  mutate(model = 'Random Forest')
+
+p <- plot_df2 %>%
+  ggplot(aes(x = .pred, y = ghge_per_capita, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted emissions per capita') +
+  ylab('Actual emissions per capita') +
+  geom_abline(col = 'black')
+p
+```
+
+Row {.column data-height=475}
+-----------------------------------------------------------------------
+```{r}
+# Tuned Boosted Tree Model
+# Define the model specification
+climate_xgb_spec <- boost_tree(trees = 1000,
+                               tree_depth = tune(),
+                               min_n = tune(),
+                               loss_reduction = tune(),
+                               sample_size = tune(),
+                               mtry = tune(),
+                               learn_rate = tune()) %>%
+  set_engine('xgboost') %>%
+  set_mode('regression')
+
+# Create workflow
+climate_xgb_wf <- workflow() %>%
+  add_formula(ghge_per_capita ~ .) %>%
+  add_model(climate_xgb_spec)
+
+# Tune the model
+climate_xgb_rs <- tune_grid(climate_xgb_wf, 
+                            resamples = wb_folds, 
+                            grid = xgb_grid, 
+                            control = control_grid(save_pred = TRUE))
+```
+
+### Tuned Gradient Boosted Tree Model
+```{r}
+# Select the best xbg model
+best_climate_xgb <- select_best(climate_xgb_rs, metric = 'rmse')
+
+# Finalize the workflow
+final_climate_xgb_wf <- climate_xgb_wf %>%
+  finalize_workflow(best_climate_xgb)
+final_climate_xgb_wf
+```
+
+```{r}
+# Fit the Final Boosted Tree Model
+final_climate_xgb <- final_climate_xgb_wf %>%
+  fit(data = wb_train)
+```
+
+### Test Metrics for Boosted Tree Model
+```{r}
+# Create metrics table
+pred_climate_xgb <- final_climate_xgb %>%
+  augment(wb_test)
+
+climate_xgb_metrics <- pred_climate_xgb %>%
+  metrics(truth = ghge_per_capita, estimate = .pred)
+
+results_new2 <- tibble(model = 'Tuned Boosted Tree',
+                  rmse = climate_xgb_metrics[[1, 3]],
+                  mae = climate_xgb_metrics[[3, 3]],
+                  rsq = climate_xgb_metrics[[2, 3]])
+results <- bind_rows(results2, results_new2)
+results
+```
+
+### Boosted Tree Model Feature Importance
+```{r}
+final_climate_xgb %>%
+  extract_fit_parsnip() %>%
+  vip(aesthetics = list(fill = "#6e0000", col = "black"))
+```
+
+### Actual vs Predicted
+```{r}
+plot_df2 <- bind_rows(plot_df2,
+                     pred_climate_xgb %>%
+                       mutate(model = 'Tuned Boosted Tree')
+                     )
+
+p <- plot_df2 %>%
+  ggplot(aes(x = .pred, y = ghge_per_capita, col = model))
+
+p <- p + geom_point(alpha = 0.40) +
+  xlab('Predicted emissions per capita') +
+  ylab('Actual emissions per capita') +
+  geom_abline(col = 'black') +
+  ggtitle('Model Comparison')
+p
+```
+
+Question 3 {data-orientation=rows}
+=======================================================================
+Column {.sidebar data-width=300}
+-------------------------------------
+
+### Question Overview
+
+#### Can we Improve Human Flourishing and Reduce GHG Emissions? 
+To begin we will transform the gdp_per_capita and ghge_per_capita variables into a combined categorical variable by using k-means clustering. We will then use the resulting clusters as the target variable for this analysis. All of the predictor variables used in parts 1 and 2 will be used as predictors of the cluster. Finally, we will look at the differences in the impacts or importance of each of those variables in predicting the cluster and compare results across clusters. By doing so, the hope is to identify ways to improve or maintain human flourshing while reducing greenhouse gas emissions.
+
+#### Conclusions
+The random forest model is highly predictive of the categorical cluster_id. This is useful in that it allows to to use the model to understand the impacts of the individual variables and qualitatively understand the differences between successful economies that have lower greenhouse gas emissions and what makes them different. To analyze this, we will use Shapley Additive Values.
+
+Row {.column data-height=425}
+-----------------------------------------------------------------------
+### Cluster analysis to create categorical variables
+```{r}
+set.seed(1111)
+
+# prepare dataframe for k-means
+wb_cat <- wb_df %>%
+  mutate(norm_log_gdp_pc = scale(log(gdp_per_capita))) %>%
+  mutate(norm_log_ghge_pc = scale(log(ghge_per_capita))) %>%
+  select(norm_log_gdp_pc, norm_log_ghge_pc)
+
+# Elbow method to determine proper number of clusters
+fviz_nbclust(wb_cat, kmeans, method = 'wss', k.max = 15)
+```
+
+### Categorical Variable, k-means clusters
+```{r}
+# Create 10 clusters because differentiation is needed at different levels of the y-axis at a similar position on the x-axis
+set.seed(1111)
+cluster_id <- kmeans(wb_cat, 10, nstart = 25)
+fviz_cluster(cluster_id, data = wb_cat)
+```
+
+```{r}
+# add cluster_id to wb_df and create testing and training datasets
+wb_df3 <- wb_df %>%
+  mutate(cluster_id = factor(cluster_id$cluster)) %>%
+  select(-gdp_per_capita, -ghge_per_capita)
+
+set.seed(1111)
+wb_split3 <- initial_split(wb_df3, prop = 0.75)
+wb_train3 <- rsample::training(wb_split3)
+wb_test3 <- rsample::testing(wb_split3)
+```
+
+### Random Forest Model
+```{r}
+# https://github.com/jshumway0475/Predictive-Analytics/blob/main/INFO%204300%20Project_Modeling3_Shumway.ipynb
+cluster_rf_spec <- rand_forest(trees = 1000) %>%
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+# Fit the model
+cluster_rf <- cluster_rf_spec %>% 
+  fit(cluster_id ~ ., data = wb_train3)
+cluster_rf
+```
+
+Row {.column data-height=425}
+-----------------------------------------------------------------------
+### Test Metrics for Random Forest Model
+```{r}
+pred_cluster_rf <- cluster_rf %>%
+  augment(wb_test3)
+
+# Collect roc_auc
+predictions <- names(predict(cluster_rf, wb_test3, type = 'prob'))
+auc_score <- roc_auc(pred_cluster_rf, truth = cluster_id, estimate = predictions) %>%
+  pull(.estimate)
+
+class_metrics <- metric_set(accuracy, sensitivity, specificity)
+cluster_rf_metrics <- pred_cluster_rf %>%
+  class_metrics(truth = cluster_id, estimate = .pred_class)
+
+# Create metrics table
+results3 <- tibble(model = 'Random Forest',
+                  accuracy = cluster_rf_metrics[[1, 3]],
+                  sensitivity = cluster_rf_metrics[[2, 3]],
+                  specificity = cluster_rf_metrics[[3, 3]],
+                  roc_auc = auc_score)
+results3
+```
+
+### Examine the Confusion Matrix
+```{r}
+pred_cluster_rf %>%
+  conf_mat(truth = cluster_id, estimate = .pred_class)
+```
+
+### ROC Curves by cluster_id
+```{r}
+# Plot multiple roc_auc curves and capture individual auc values for each cluster
+df_roc <- pred_cluster_rf %>% roc_curve(truth = cluster_id, estimate = predictions)
+
+# Plot ROC curves
+p <- ggplot(df_roc, aes(x = 1- specificity, y = sensitivity, group = .level, col = .level))
+p + geom_path() + 
+  geom_abline(lty = 3) +
+  scale_color_brewer(palette = 'Dark2') +
+  theme(legend.position = 'bottom')
+```
+
+Shapley Values for Question 3 {data-orientation=rows}
+=======================================================================
+Column {.sidebar data-width=300}
+-------------------------------------
+
+### Question Overview 
+A highly accurate random forest model has been constructed to predict the cluster_id associated with the combination of gdp_per_capita and ghge_per_capita. We will use Shapley values to help explain the results of this model and provide insight into the potential combinations of predictors that could result in high quality of life and minimized greenhouse gas emissions.
+
+#### Conclusions
+The best way to compare Shapley Additive Values on multi-categorical results in my opinion is through beeswarm plots and waterfall plots on individual observations to understand the impact of each variable relative to the result. I was unable to figure out how to create those plots in R. Instead I am comparing the Shapley version of the variable importance plot for each category and then comparing the results against select clusters.
+
+For example, we can see that for cluster_id 7 which has high gpd_per_capita but also the highest greenhouse gas emissions compared against cluster_id 9 (equally high gpd_per_capita with lower emissions) that nuclear and hydroelectric play a lesser role. We also see that agriculture is more important to the economy (the most important) than in cluster_id = 9.
+
+During this project, I worked the hardest trying to make the Shapley values work for problem 3 as I belive it is the best way to interpret the results of this model. If I had an extra week, I would work on adding more informative visuals from the Shapley results (maybe by using the reticulate library allowing me to invoke Python)
+
+Row {.column data-height=425}
+-----------------------------------------------------------------------
+```{r}
+x_train <- as.data.frame(subset(wb_train3, select = -cluster_id))
+
+pfun <- function(object, newdata) {
+  as.integer(predict(object, new_data = newdata)$.pred_class)
+}
+
+shap <- fastshap::explain(cluster_rf, X = x_train, pred_wrapper = pfun)
+shap$cluster_id <- wb_train3$cluster_id
+```
+
+### Shapley Importance Plot, cluster_id = 7
+```{r}
+clusters <- c(7, 9, 6, 5)
+shap_7 <- subset(shap[shap$cluster_id %in% as.character(7), ], select = -cluster_id)
+autoplot(shap_7) + ggtitle('cluster_id = 7')
+```
+
+### Shapley Importance Plot, cluster_id = 9
+```{r}
+shap_9 <- subset(shap[shap$cluster_id %in% as.character(9), ], select = -cluster_id)
+autoplot(shap_9) + ggtitle('cluster_id = 9')
+```
+
+Row {.column data-height=425}
+-----------------------------------------------------------------------
+### Shapley Importance Plot, cluster_id = 6
+```{r}
+shap_6 <- subset(shap[shap$cluster_id %in% as.character(6), ], select = -cluster_id)
+autoplot(shap_6) + ggtitle('cluster_id = 6')
+```
+
+### Shapley Importance Plot, cluster_id = 5
+```{r}
+shap_5 <- subset(shap[shap$cluster_id %in% as.character(5), ], select = -cluster_id)
+autoplot(shap_5) + ggtitle('cluster_id = 5')
+```
