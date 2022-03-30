@@ -1,7 +1,7 @@
 # Predictive-Analytics
 This repository is intended to contain various examples of predictive models that I have created
 
-### **Optimzation using Pyomo glpk solver**
+### **Optimization using Pyomo glpk solver**
 **Jupyter notebook**: `Optimization with Pyomo.ipynb` **No guarantees on correct answers!!**  
 **Problem descriptions**: `INFO4590Portfolio3--PyomoOptimizationProblems.docx`  
 **Data**: `INFO4590PyomoData.xlsx`  
@@ -18,6 +18,6 @@ This repository is intended to contain various examples of predictive models tha
 
 ### **INFO 4390 Final Project - Balancing Climate with Human Prosperity**
 This course focuses on predictive analytics using R \
-**Data**: Same as above \
+**Data**: Same as above for INFO 4300 \
 **R Markdown**: `INFO 4390_Project_Shumway.rmd` \
 **flex dashboard**: `INFO-4390_Project_Shumway.html`
